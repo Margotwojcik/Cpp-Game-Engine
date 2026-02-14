@@ -1,156 +1,139 @@
-#include <GLFW/glfw3.h> 
-#include <vector>
-#include <cstdlib>
-#include <ctime>
+#include <GLFW/glfw3.h>
 #include <iostream>
+#include <vector>
 
-using namespace std;
+// Definicja dla biblioteki ładowania obrazków
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
-const int WIDTH = 20;
-const int HEIGHT = 20;
-const float CELL_SIZE = 0.1f; 
+// --- KLASA TEKSTURY ---
+class Texture {
+public:
+    GLuint id;
+    int width, height, nrChannels;
 
-struct Point {
-    int x, y;
+    Texture(const char* filePath) {
+        glGenTextures(1, &id);
+        glBindTexture(GL_TEXTURE_2D, id);
+
+        // Parametry wyświetlania
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_set_flip_vertically_on_load(true); 
+        unsigned char *data = stbi_load(filePath, &width, &height, &nrChannels, 0);
+        
+        if (data) {
+            GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+            glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+            // glGenerateMipmap usunięte dla uniknięcia błędów kompilacji bez GLEW
+            std::cout << "Zaladowano teksture: " << filePath << std::endl;
+        } else {
+            std::cerr << "Blad: Nie znaleziono pliku " << filePath << std::endl;
+        }
+        stbi_image_free(data);
+    }
+
+    void bind() { glBindTexture(GL_TEXTURE_2D, id); }
 };
 
-enum Direction { STOP = 0, LEFT, RIGHT, UP, DOWN };
+// --- KLASA RENDERERA ---
+class Renderer {
+public:
+    void drawSprite(float x, float y, float size, Texture& tex) {
+        glEnable(GL_TEXTURE_2D);
+        tex.bind();
+        glColor3f(1.0f, 1.0f, 1.0f); 
 
-vector<Point> snake;
-Point fruit;
-Direction dir = STOP;
-bool gameOver = false;
-
-void spawnFruit() {
-    fruit.x = rand() % WIDTH;
-    fruit.y = rand() % HEIGHT;
-}
-
-void initGame() {
-    srand(static_cast<unsigned int>(time(0)));
-    snake.clear();
-    // Startujemy na środku
-    snake.push_back({WIDTH / 2, HEIGHT / 2});
-    dir = STOP;
-    spawnFruit();
-}
-
-void update() {
-    if (dir == STOP || gameOver) return;
-
-    // Zapamiętujemy pozycję głowy przed ruchem
-    Point prev = snake[0];
-    
-    // Ruch głowy
-    switch(dir) {
-        case LEFT:  snake[0].x--; break;
-        case RIGHT: snake[0].x++; break;
-        case UP:    snake[0].y++; break;
-        case DOWN:  snake[0].y--; break;
-        default: break;
+        glBegin(GL_QUADS);
+            glTexCoord2f(0.0f, 0.0f); glVertex2f(x, y);
+            glTexCoord2f(1.0f, 0.0f); glVertex2f(x + size, y);
+            glTexCoord2f(1.0f, 1.0f); glVertex2f(x + size, y + size);
+            glTexCoord2f(0.0f, 1.0f); glVertex2f(x, y + size);
+        glEnd();
+        
+        glDisable(GL_TEXTURE_2D);
     }
+};
 
-    // Kolizja ze ścianami
-    if (snake[0].x < 0 || snake[0].x >= WIDTH || snake[0].y < 0 || snake[0].y >= HEIGHT) {
-        gameOver = true;
-        return;
-    }
+// --- GŁÓWNA KLASA SILNIKA ---
+class GameEngine {
+private:
+    GLFWwindow* window;
+    Renderer renderer;
+    Texture* playerTex;
+    bool running;
 
-    // Ruch ogona
-    for (size_t i = 1; i < snake.size(); i++) {
-        Point temp = snake[i];
-        snake[i] = prev;
-        prev = temp;
-    }
+    // Pozycja gracza
+    float playerX = -0.25f;
+    float playerY = -0.25f;
+    float speed = 0.02f;
 
-    // Kolizja z samym sobą
-    for (size_t i = 1; i < snake.size(); i++) {
-        if (snake[i].x == snake[0].x && snake[i].y == snake[0].y) {
-            gameOver = true;
+public:
+    GameEngine() : window(nullptr), playerTex(nullptr), running(true) {}
+
+    bool init(int width, int height, const char* title) {
+        if (!glfwInit()) return false;
+        window = glfwCreateWindow(width, height, title, NULL, NULL);
+        if (!window) {
+            glfwTerminate();
+            return false;
         }
+        glfwMakeContextCurrent(window);
+
+        // Ładowanie tekstury
+        playerTex = new Texture("player.png"); 
+
+        return true;
     }
 
-    // Zjadanie owocu
-    if (snake[0].x == fruit.x && snake[0].y == fruit.y) {
-        // Dodajemy nowy segment na końcu (pozycja prev po pętli to ostatni ogon)
-        snake.push_back(prev); 
-        spawnFruit();
-    }
-}
-
-void drawCell(int x, int y) {
-    // Przeliczenie współrzędnych siatki (0-20) na układ OpenGL (-1.0 do 1.0)
-    float xf = -1.0f + (x * (2.0f / WIDTH));
-    float yf = -1.0f + (y * (2.0f / HEIGHT));
-    float w = 2.0f / WIDTH;
-    float h = 2.0f / HEIGHT;
-
-    glBegin(GL_QUADS);
-        glVertex2f(xf, yf);
-        glVertex2f(xf + w, yf);
-        glVertex2f(xf + w, yf + h);
-        glVertex2f(xf, yf + h);
-    glEnd();
-}
-
-void draw() {
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // Rysuj owoc (Czerwony)
-    glColor3f(1.0f, 0.0f, 0.0f);
-    drawCell(fruit.x, fruit.y);
-
-    // Rysuj węża (Zielony)
-    glColor3f(0.0f, 1.0f, 0.0f);
-    for (auto const& s : snake)
-        drawCell(s.x, s.y);
-}
-
-void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS) {
-        switch(key) {
-            // Dodana blokada zawracania o 180 stopni
-            case GLFW_KEY_W: if(dir != DOWN) dir = UP; break;
-            case GLFW_KEY_S: if(dir != UP) dir = DOWN; break;
-            case GLFW_KEY_A: if(dir != RIGHT) dir = LEFT; break;
-            case GLFW_KEY_D: if(dir != LEFT) dir = RIGHT; break;
-            case GLFW_KEY_Q: gameOver = true; break;
-        }
-    }
-}
-
-int main() {
-    if (!glfwInit()) return -1;
-
-    GLFWwindow* window = glfwCreateWindow(600, 600, "Snake OpenGL - Sterowanie WSAD", NULL, NULL);
-    if (!window) {
-        glfwTerminate();
-        return -1;
+    void handleInput() {
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            running = false;
+        
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) playerY += speed;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) playerY -= speed;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) playerX -= speed;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) playerX += speed;
     }
 
-    glfwMakeContextCurrent(window);
-    glfwSetKeyCallback(window, keyCallback);
+    void update() {
+        // Tutaj można dodać logikę gry, np. kolizje
+    }
 
-    initGame();
-
-    double lastTime = glfwGetTime();
-    const double frameDelay = 0.15; 
-
-    while (!glfwWindowShouldClose(window) && !gameOver) {
-        double currentTime = glfwGetTime();
-        if (currentTime - lastTime >= frameDelay) {
-            update();
-            lastTime = currentTime;
+    void render() {
+        glClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Ciemne tło
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        if(playerTex) {
+            renderer.drawSprite(playerX, playerY, 0.5f, *playerTex);
         }
 
-        draw();
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    if (gameOver) cout << "GAME OVER! Wynik: " << snake.size() << endl;
+    void run() {
+        while (running && !glfwWindowShouldClose(window)) {
+            handleInput();
+            update();
+            render();
+        }
+    }
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    ~GameEngine() {
+        if (playerTex) delete playerTex;
+        glfwDestroyWindow(window);
+        glfwTerminate();
+    }
+};
+
+int main() {
+    GameEngine engine;
+    if (engine.init(800, 800, "C++ Engine - Sterowanie WSAD")) {
+        engine.run();
+    }
     return 0;
 }
