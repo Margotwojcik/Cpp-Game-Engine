@@ -59,6 +59,18 @@ public:
         return true;
     }
 
+    void updateTitle() {
+        std::string title;
+        if (currentState == SNAKE_GAME) 
+            title = "Snake - Score: " + std::to_string(snakeScore);
+        else if (currentState == PONG_GAME) 
+            title = "Pong - Left: " + std::to_string(scoreL) + " | Right: " + std::to_string(scoreR);
+        else 
+            title = "Multigame Engine";
+        
+        glfwSetWindowTitle(window, title.c_str());
+    }
+
     void handleInput() {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) running = false;
         if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS) currentState = MENU;
@@ -90,13 +102,22 @@ public:
         }
     }
 
-    void updateSnake() {
+   void updateSnake() {
         Point newHead = {snake[0].x + dirX, snake[0].y + dirY};
-        if (newHead.x < 0 || newHead.x >= 20 || newHead.y < 0 || newHead.y >= 20) { currentState = GAME_OVER; return; }
+        if (newHead.x < 0 || newHead.x >= 20 || newHead.y < 0 || newHead.y >= 20) {
+            currentState = GAME_OVER; return;
+        }
+        for (auto& p : snake) {
+            if (newHead.x == p.x && newHead.y == p.y) { currentState = GAME_OVER; return; }
+        }
         snake.insert(snake.begin(), newHead);
         if (newHead.x == food.x && newHead.y == food.y) {
-            snakeScore += 10; food = { rand() % 20, rand() % 20 };
-        } else { snake.pop_back(); }
+            snakeScore += 10;
+            food = { rand() % 20, rand() % 20 };
+            updateTitle();
+        } else {
+            snake.pop_back();
+        }
     }
 
     void updatePong() {
@@ -154,6 +175,7 @@ public:
 int main() {
     GameEngine engine;
     if (engine.init(800, 600, "Multigame Engine")) {
+        std::cout << "1 - Snake, 2 - Pong, M - Menu" << std::endl;
         engine.run();
     }
     return 0;
