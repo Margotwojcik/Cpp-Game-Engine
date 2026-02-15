@@ -1,116 +1,138 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
+#include <cstdlib>
+#include <string>
 
-// Definicja dla biblioteki ładowania obrazków
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+enum GameState { MENU, SNAKE_GAME, PONG_GAME, GAME_OVER };
+GameState currentState = MENU;
 
-// --- KLASA TEKSTURY ---
-class Texture {
-public:
-    GLuint id;
-    int width, height, nrChannels;
+// --- LOGIKA SNAKE ---
+struct Point { int x, y; };
+std::vector<Point> snake = {{10, 10}, {10, 11}, {10, 12}};
+Point food = {5, 5};
+int dirX = 0, dirY = -1;
+int snakeScore = 0;
 
-    Texture(const char* filePath) {
-        glGenTextures(1, &id);
-        glBindTexture(GL_TEXTURE_2D, id);
+// --- LOGIKA PONG ---
+float paddleL_Y = 0.0f;
+float paddleR_Y = 0.0f;
+float ballX = 0.0f, ballY = 0.0f;
+float ballSpeedX = 0.015f; // Zmniejszona prędkość bazowa
+float ballSpeedY = 0.012f;
+int scoreL = 0, scoreR = 0;
 
-        // Parametry wyświetlania
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        stbi_set_flip_vertically_on_load(true); 
-        unsigned char *data = stbi_load(filePath, &width, &height, &nrChannels, 0);
-        
-        if (data) {
-            GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
-            glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-            // glGenerateMipmap usunięte dla uniknięcia błędów kompilacji bez GLEW
-            std::cout << "Zaladowano teksture: " << filePath << std::endl;
-        } else {
-            std::cerr << "Blad: Nie znaleziono pliku " << filePath << std::endl;
-        }
-        stbi_image_free(data);
-    }
-
-    void bind() { glBindTexture(GL_TEXTURE_2D, id); }
-};
-
-// --- KLASA RENDERERA ---
 class Renderer {
 public:
-    void drawSprite(float x, float y, float size, Texture& tex) {
-        glEnable(GL_TEXTURE_2D);
-        tex.bind();
-        glColor3f(1.0f, 1.0f, 1.0f); 
-
+    void drawQuad(float x, float y, float w, float h, float r, float g, float b) {
+        glColor3f(r, g, b);
         glBegin(GL_QUADS);
-            glTexCoord2f(0.0f, 0.0f); glVertex2f(x, y);
-            glTexCoord2f(1.0f, 0.0f); glVertex2f(x + size, y);
-            glTexCoord2f(1.0f, 1.0f); glVertex2f(x + size, y + size);
-            glTexCoord2f(0.0f, 1.0f); glVertex2f(x, y + size);
+            glVertex2f(x, y);
+            glVertex2f(x + w, y);
+            glVertex2f(x + w, y + h);
+            glVertex2f(x, y + h);
         glEnd();
-        
-        glDisable(GL_TEXTURE_2D);
     }
 };
 
-// --- GŁÓWNA KLASA SILNIKA ---
 class GameEngine {
 private:
     GLFWwindow* window;
     Renderer renderer;
-    Texture* playerTex;
     bool running;
-
-    // Pozycja gracza
-    float playerX = -0.25f;
-    float playerY = -0.25f;
-    float speed = 0.02f;
+    double lastUpdate;
 
 public:
-    GameEngine() : window(nullptr), playerTex(nullptr), running(true) {}
+    GameEngine() : window(nullptr), running(true), lastUpdate(0.0) {}
 
-    bool init(int width, int height, const char* title) {
+    bool init(int w, int h, const char* t) {
         if (!glfwInit()) return false;
-        window = glfwCreateWindow(width, height, title, NULL, NULL);
-        if (!window) {
-            glfwTerminate();
-            return false;
-        }
+        window = glfwCreateWindow(w, h, t, NULL, NULL);
+        if (!window) return false;
         glfwMakeContextCurrent(window);
 
-        // Ładowanie tekstury
-        playerTex = new Texture("player.png"); 
+        // KLUCZOWA LINIA: Włącza VSync (limit klatek do odświeżania monitora)
+        // To sprawi, że pętla nie będzie lecieć "jak szalona"
+        glfwSwapInterval(1); 
 
+        lastUpdate = glfwGetTime();
         return true;
     }
 
     void handleInput() {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-            running = false;
-        
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) playerY += speed;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) playerY -= speed;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) playerX -= speed;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) playerX += speed;
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) running = false;
+        if (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS) currentState = MENU;
+
+        if (currentState == MENU || currentState == GAME_OVER) {
+            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) {
+                snake = {{10, 10}, {10, 11}, {10, 12}};
+                dirX = 0; dirY = -1; snakeScore = 0;
+                currentState = SNAKE_GAME;
+            }
+            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) {
+                scoreL = 0; scoreR = 0; ballX = 0; ballY = 0;
+                currentState = PONG_GAME;
+            }
+        } 
+        else if (currentState == SNAKE_GAME) {
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS && dirY != -1) { dirX = 0; dirY = 1; }
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS && dirY != 1) { dirX = 0; dirY = -1; }
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS && dirX != 1) { dirX = -1; dirY = 0; }
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS && dirX != -1) { dirX = 1; dirY = 0; }
+        }
+        else if (currentState == PONG_GAME) {
+            // Bardzo mała wartość ruchu, teraz przy VSync będzie płynna
+            float pSpeed = 0.02f; 
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS && paddleL_Y < 0.75f) paddleL_Y += pSpeed;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS && paddleL_Y > -0.75f) paddleL_Y -= pSpeed;
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS && paddleR_Y < 0.75f) paddleR_Y += pSpeed;
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS && paddleR_Y > -0.75f) paddleR_Y -= pSpeed;
+        }
     }
 
-    void update() {
-        // Tutaj można dodać logikę gry, np. kolizje
+    void updateSnake() {
+        Point newHead = {snake[0].x + dirX, snake[0].y + dirY};
+        if (newHead.x < 0 || newHead.x >= 20 || newHead.y < 0 || newHead.y >= 20) { currentState = GAME_OVER; return; }
+        snake.insert(snake.begin(), newHead);
+        if (newHead.x == food.x && newHead.y == food.y) {
+            snakeScore += 10; food = { rand() % 20, rand() % 20 };
+        } else { snake.pop_back(); }
+    }
+
+    void updatePong() {
+        ballX += ballSpeedX;
+        ballY += ballSpeedY;
+
+        if (ballY > 0.95f || ballY < -0.95f) ballSpeedY = -ballSpeedY;
+
+        // Kolizje z paletkami
+        if (ballX < -0.85f && ballY < paddleL_Y + 0.25f && ballY > paddleL_Y - 0.25f) ballSpeedX = std::abs(ballSpeedX);
+        if (ballX > 0.85f && ballY < paddleR_Y + 0.25f && ballY > paddleR_Y - 0.25f) ballSpeedX = -std::abs(ballSpeedX);
+
+        if (ballX < -1.0f) { scoreR++; ballX = 0; ballY = 0; }
+        if (ballX > 1.0f) { scoreL++; ballX = 0; ballY = 0; }
+
+        std::string t = "Pong - L: " + std::to_string(scoreL) + " R: " + std::to_string(scoreR);
+        glfwSetWindowTitle(window, t.c_str());
     }
 
     void render() {
-        glClearColor(0.1f, 0.1f, 0.15f, 1.0f); // Ciemne tło
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         
-        if(playerTex) {
-            renderer.drawSprite(playerX, playerY, 0.5f, *playerTex);
+        if (currentState == MENU) {
+            renderer.drawQuad(-0.5f, -0.2f, 0.4f, 0.4f, 0.0f, 0.8f, 0.0f); 
+            renderer.drawQuad(0.1f, -0.2f, 0.4f, 0.4f, 0.0f, 0.4f, 0.8f);
+        } 
+        else if (currentState == SNAKE_GAME) {
+            renderer.drawQuad(food.x/10.0f - 1.0f, food.y/10.0f - 1.0f, 0.09f, 0.09f, 1.0f, 0.0f, 0.0f);
+            for (auto& p : snake) renderer.drawQuad(p.x/10.0f - 1.0f, p.y/10.0f - 1.0f, 0.09f, 0.09f, 0.0f, 1.0f, 0.0f);
         }
-
+        else if (currentState == PONG_GAME) {
+            renderer.drawQuad(-0.9f, paddleL_Y - 0.2f, 0.05f, 0.4f, 1.0f, 1.0f, 1.0f);
+            renderer.drawQuad(0.85f, paddleR_Y - 0.2f, 0.05f, 0.4f, 1.0f, 1.0f, 1.0f);
+            renderer.drawQuad(ballX, ballY, 0.04f, 0.04f, 1.0f, 1.0f, 0.0f);
+        }
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -118,21 +140,20 @@ public:
     void run() {
         while (running && !glfwWindowShouldClose(window)) {
             handleInput();
-            update();
+            double currentTime = glfwGetTime();
+            if (currentState == SNAKE_GAME) {
+                if (currentTime - lastUpdate >= 0.12) { updateSnake(); lastUpdate = currentTime; }
+            } else if (currentState == PONG_GAME) {
+                updatePong(); 
+            }
             render();
         }
-    }
-
-    ~GameEngine() {
-        if (playerTex) delete playerTex;
-        glfwDestroyWindow(window);
-        glfwTerminate();
     }
 };
 
 int main() {
     GameEngine engine;
-    if (engine.init(800, 800, "C++ Engine - Sterowanie WSAD")) {
+    if (engine.init(800, 600, "Multigame Engine")) {
         engine.run();
     }
     return 0;
